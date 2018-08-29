@@ -8,7 +8,7 @@ package org.rust.lang.refactoring.implementMembers
 import com.intellij.openapi.actionSystem.ex.ActionManagerEx
 import junit.framework.TestCase
 import org.intellij.lang.annotations.Language
-import org.rust.lang.RsTestBase
+import org.rust.RsTestBase
 
 
 class ImplementMembersHandlerTest : RsTestBase() {
@@ -588,7 +588,7 @@ class ImplementMembersHandlerTest : RsTestBase() {
             fn baz() {}/*caret*/
         }
     """, listOf(
-        ImplementMemberSelection("bar()", true, isSelected = true)
+        ImplementMemberSelection("bar ()", true, isSelected = true)
     ), """
         macro_rules! foo {
             ($ i:ident, $ j:tt) => { fn $ i() $ j }

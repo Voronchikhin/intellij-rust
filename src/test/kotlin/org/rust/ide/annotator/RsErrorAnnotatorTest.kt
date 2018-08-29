@@ -5,7 +5,7 @@
 
 package org.rust.ide.annotator
 
-import org.rust.lang.MockRustcVersion
+import org.rust.MockRustcVersion
 
 class RsErrorAnnotatorTest : RsAnnotationTestBase() {
     override val dataPath = "org/rust/ide/annotator/fixtures/errors"
@@ -1171,5 +1171,15 @@ class RsErrorAnnotatorTest : RsAnnotationTestBase() {
         mod foo {
             #![feature(crate_visibility_modifier)]
         }
+    """)
+
+    fun `test parenthesized lifetime bounds`() = checkErrors("""
+        fn foo<'a, T: <error descr="Parenthesized lifetime bounds are not supported">('a)</error>>(t: T) {
+            unimplemented!();
+        }
+    """)
+
+    fun `test crate keyword not at the beginning`() = checkErrors("""
+       use crate::foo::<error descr="`crate` is allowed only at the beginning">crate</error>::Foo;
     """)
 }

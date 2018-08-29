@@ -9,8 +9,8 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <a href="https://intellij-rust.github.io/2018/07/24/changelog-79.html">
-                 https://intellij-rust.github.io/2018/07/24/changelog-79.html
+        <a href="https://intellij-rust.github.io/2018/08/27/changelog-81.html">
+                 https://intellij-rust.github.io/2018/08/27/changelog-81.html
     ]]>
     </change-notes>
 
@@ -64,7 +64,8 @@
         <postFormatProcessor implementation="org.rust.ide.formatter.processors.RsTrailingCommaFormatProcessor"/>
         <preFormatProcessor implementation="org.rust.ide.formatter.processors.RsMatchArmCommaFormatProcessor"/>
         <preFormatProcessor implementation="org.rust.ide.formatter.processors.RsStatementSemicolonFormatProcessor"/>
-        <preFormatProcessor implementation="org.rust.ide.formatter.processors.RsSingleImportRemoveBracesFormatProcessor"/>
+        <preFormatProcessor
+            implementation="org.rust.ide.formatter.processors.RsSingleImportRemoveBracesFormatProcessor"/>
 
         <!-- Refactoring support -->
 
@@ -569,6 +570,14 @@
             <className>org.rust.ide.intentions.FlipBinaryExpressionIntention</className>
             <category>Rust</category>
         </intentionAction>
+        <intentionAction>
+            <className>org.rust.ide.intentions.RsShowRecursiveMacroExpansionIntention</className>
+            <category>Rust</category>
+        </intentionAction>
+        <intentionAction>
+            <className>org.rust.ide.intentions.RsShowSingleStepMacroExpansionIntention</className>
+            <category>Rust</category>
+        </intentionAction>
 
         <!-- Run Configurations -->
 
@@ -582,9 +591,21 @@
 
         <!-- Cargo -->
 
-        <projectConfigurable instance="org.rust.cargo.project.configurable.RustProjectConfigurable"
+        <projectConfigurable instance="org.rust.cargo.project.configurable.RsProjectConfigurable"
                              displayName="Rust"
-                             groupId="language"/>
+                             groupId="language"
+                             id="language.rust"/>
+
+        <projectConfigurable instance="org.rust.cargo.project.configurable.CargoConfigurable"
+                             displayName="Cargo"
+                             parentId="language.rust"
+                             id="language.rust.cargo"/>
+
+        <projectConfigurable instance="org.rust.cargo.project.configurable.RustfmtConfigurable"
+                             displayName="Rustfmt"
+                             parentId="language.rust"
+                             id="language.rust.rustfmt"/>
+
         <projectService serviceInterface="org.rust.cargo.project.settings.RustProjectSettingsService"
                         serviceImplementation="org.rust.cargo.project.settings.impl.RustProjectSettingsServiceImpl"/>
         <projectService serviceInterface="org.rust.cargo.project.model.CargoProjectsService"
@@ -644,6 +665,8 @@
         <statementUpDownMover implementation="org.rust.ide.actions.mover.RsItemUpDownMover"/>
 
 
+        <lang.elementManipulator forClass="org.rust.lang.core.psi.RsLitExpr"
+                                 implementationClass="org.rust.ide.injected.RsStringLiteralManipulator"/>
         <multiHostInjector implementation="org.rust.ide.injected.RsRegExpInjector"/>
 
 
@@ -704,7 +727,7 @@
 
         <action id="Rust.CargoFmtFile"
                 class="org.rust.ide.actions.RustfmtFileAction"
-                text="Reformat file with rustfmt"
+                text="Reformat File with Rustfmt"
                 description="Reformat current file with rustfmt">
             <add-to-group group-id="CodeMenu" anchor="last"/>
         </action>
@@ -732,6 +755,28 @@
                 icon="AllIcons.ToolbarDecorator.Remove"
                 use-shortcut-of="$Delete"/>
 
+        <action id="Rust.ShowSingleStepMacroExpansionAction"
+                class="org.rust.ide.actions.macroExpansion.RsShowSingleStepMacroExpansionAction"
+                text="Show expanded macro">
+        </action>
+        <action id="Rust.ShowRecursiveMacroExpansionAction"
+                class="org.rust.ide.actions.macroExpansion.RsShowRecursiveMacroExpansionAction"
+                text="Show recursively expanded macro">
+        </action>
+        <group id="Rust.MacroExpansionActions"
+               text="Show Macro Expansion"
+               class="org.rust.ide.actions.macroExpansion.RsShowMacroExpansionGroup">
+            <add-to-group group-id="EditorPopupMenu"/>
+            <separator/>
+            <reference id="Rust.ShowRecursiveMacroExpansionAction"/>
+            <reference id="Rust.ShowSingleStepMacroExpansionAction"/>
+        </group>
+
+        <action class="org.rust.lang.refactoring.generateConstructor.GenerateConstructorAction"
+                id="Rust.GenerateConstructor"
+                text="Generate Constructor">
+            <add-to-group group-id="GenerateGroup"/>
+        </action>
         <group id="Rust.Cargo">
             <reference id="Rust.RefreshCargoProject"/>
             <reference id="Rust.CargoCommand"/>
