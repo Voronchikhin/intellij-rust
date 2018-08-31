@@ -45,7 +45,7 @@ fun showConstructorArgumentsChooser(
         MOCK!!
     } else memberChooserDialog
     return chooser(project,
-        ConstructorArguments.argumentsFromStruct(structItem).map { RsStructMemberChooserMember(base, it) })?.map { it.member }
+        ConstructorArguments.fromStruct(structItem).map { RsStructMemberChooserMember(base, it) })?.map { it.member }
 }
 typealias StructMemberChooser = (
     project: Project,

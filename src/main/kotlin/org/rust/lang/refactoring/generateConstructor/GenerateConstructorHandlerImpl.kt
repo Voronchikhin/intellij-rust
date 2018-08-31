@@ -31,7 +31,8 @@ fun insertNewConstructor(structItem: RsStructItem, selectedFields: List<Construc
 
 fun getFunction(structItem: RsStructItem, selectedFields: List<ConstructorArguments>, rsPsiFactory: RsPsiFactory): RsFunction {
     val arguments = buildString {
-        append(selectedFields.joinToString(prefix = "(", postfix = ")", separator = ",") { "${it.argumentIdentifier}:${(it.typeReference)}" })
+        append(selectedFields.joinToString(prefix = "(", postfix = ")", separator = ",")
+        { "${it.argumentIdentifier}:${(it.typeReference)}" })
     }
 
     val body = generateBody(structItem, selectedFields)
@@ -40,10 +41,9 @@ fun getFunction(structItem: RsStructItem, selectedFields: List<ConstructorArgume
 
 
 fun generateBody(structItem: RsStructItem, selectedFields: List<ConstructorArguments>): String {
-
     val prefix = if (isTupleStruct(structItem)) "(" else "{"
     val postfix = if (isTupleStruct(structItem)) ")" else "}"
-    return structItem.nameIdentifier?.text + ConstructorArguments.argumentsFromStruct(structItem).joinToString(prefix = prefix, postfix = postfix, separator = ",") {
+    return structItem.nameIdentifier?.text + ConstructorArguments.fromStruct(structItem).joinToString(prefix = prefix, postfix = postfix, separator = ",") {
         if (!selectedFields.contains(it)) {
             it.fieldIdentifier
         } else {
@@ -59,24 +59,28 @@ fun isTupleStruct(structItem: RsStructItem): Boolean {
 
 data class ConstructorArguments(val argumentIdentifier: String, val fieldIdentifier: String, val typeReference: String) {
     companion object {
-        private fun argumentsFromTupleList(tupleFieldList: List<RsTupleFieldDecl>): List<ConstructorArguments> {
+        private fun fromTupleList(tupleFieldList: List<RsTupleFieldDecl>): List<ConstructorArguments> {
             return tupleFieldList.mapIndexed { index: Int, tupleField: RsTupleFieldDecl ->
                 ConstructorArguments("field$index", "()", tupleField.typeReference.text ?: "[unknown]")
             }
         }
 
-        fun argumentsFromStruct(rsStructItem: RsStructItem): List<ConstructorArguments> {
-            return if (isTupleStruct(rsStructItem)) {
-                argumentsFromTupleList(rsStructItem.tupleFields?.tupleFieldDeclList ?: emptyList())
+        fun fromStruct(structItem: RsStructItem): List<ConstructorArguments> {
+            return if (isTupleStruct(structItem)) {
+                fromTupleList(structItem.tupleFields?.tupleFieldDeclList.orEmpty())
             } else {
-                argumentsFromFieldList(rsStructItem.blockFields?.fieldDeclList ?: emptyList())
+                fromFieldList(structItem.blockFields?.fieldDeclList.orEmpty())
             }
         }
 
-        private fun argumentsFromFieldList(rsFieldDeclList: List<RsFieldDecl>): List<ConstructorArguments> {
+        private fun fromFieldList(rsFieldDeclList: List<RsFieldDecl>): List<ConstructorArguments> {
             return rsFieldDeclList.map {
-                ConstructorArguments(it.identifier.text ?: "()", it.identifier.text + ":()", it.typeReference?.text
-                    ?: "[unknown]")
+                ConstructorArguments(
+                    it.identifier.text ?: "()",
+                    it.identifier.text + ":()",
+                    it.typeReference?.text
+                        ?: "[unknown]"
+                )
             }
         }
     }
