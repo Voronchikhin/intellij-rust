@@ -5,11 +5,13 @@
 
 package org.rust.ide.annotator
 
+import com.intellij.testFramework.LightProjectDescriptor
 import org.rust.MockRustcVersion
+import org.rust.WithStdlibRustProjectDescriptor
 
 class RsErrorAnnotatorTest : RsAnnotationTestBase() {
     override val dataPath = "org/rust/ide/annotator/fixtures/errors"
-
+    override fun getProjectDescriptor(): LightProjectDescriptor = WithStdlibRustProjectDescriptor
     fun `test invalid module declarations`() = doTest("helper.rs")
 
     fun `test create file quick fix`() = checkByDirectory {
@@ -1181,5 +1183,19 @@ class RsErrorAnnotatorTest : RsAnnotationTestBase() {
 
     fun `test crate keyword not at the beginning`() = checkErrors("""
        use crate::foo::<error descr="`crate` is allowed only at the beginning">crate</error>::Foo;
+    """)
+
+    fun `test not allowed try expr`() = checkErrors("""
+       fn foo(){
+     let a = 2<error descr="the `?` operator can only be applied to values that implement `std::ops::Try`">?</error>;
+       }
+    """)
+
+
+    fun `test try expr in function that not allow try expr`() = checkErrors("""
+       fn foo()->i32{
+            Ok(92)<error descr="the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `std::ops::Try`)">?</error>;
+            92
+       }
     """)
 }

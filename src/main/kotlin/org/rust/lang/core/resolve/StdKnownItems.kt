@@ -96,6 +96,9 @@ class StdKnownItems private constructor(
     fun findToOwnedTrait(): RsTraitItem? =
         findCoreItem("borrow::ToOwned") as? RsTraitItem
 
+    fun findTryTrait(): RsTraitItem? =
+        findCoreItem("ops::Try") as? RsTraitItem
+
     fun findToStringTrait(): RsTraitItem? =
         findCoreItem("string::ToString") as? RsTraitItem
 

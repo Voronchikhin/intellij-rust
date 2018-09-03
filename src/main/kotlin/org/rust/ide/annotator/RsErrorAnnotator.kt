@@ -12,19 +12,26 @@ import com.intellij.lang.annotation.Annotator
 import com.intellij.openapi.util.Key
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.util.parentOfType
 import org.rust.cargo.project.workspace.PackageOrigin
 import org.rust.cargo.toolchain.RustChannel
 import org.rust.ide.annotator.fixes.AddFeatureAttributeFix
 import org.rust.ide.annotator.fixes.AddModuleFileFix
 import org.rust.ide.annotator.fixes.AddTurbofishFix
+import org.rust.ide.annotator.fixes.ImplementFromTraitFix
+import org.rust.ide.presentation.insertionSafeText
 import org.rust.lang.core.CRATE_VISIBILITY_MODIFIER
 import org.rust.lang.core.CompilerFeature
-import org.rust.lang.core.FeatureState.*
+import org.rust.lang.core.FeatureState.ACCEPTED
+import org.rust.lang.core.FeatureState.ACTIVE
 import org.rust.lang.core.psi.*
 import org.rust.lang.core.psi.ext.*
+import org.rust.lang.core.resolve.ImplLookup
 import org.rust.lang.core.resolve.Namespace
+import org.rust.lang.core.resolve.StdKnownItems
 import org.rust.lang.core.resolve.namespaces
 import org.rust.lang.core.stubs.index.RsFeatureIndex
+import org.rust.lang.core.types.TraitRef
 import org.rust.lang.core.types.inference
 import org.rust.lang.core.types.ty.*
 import org.rust.lang.core.types.type
@@ -67,9 +74,63 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
             override fun visitArrayType(o: RsArrayType) = collectDiagnostics(holder, o)
             override fun visitVariantDiscriminant(o: RsVariantDiscriminant) = collectDiagnostics(holder, o)
             override fun visitPolybound(o: RsPolybound) = checkPolybound(holder, o)
+            override fun visitTryExpr(o: RsTryExpr) = checkTryExpr(holder, o)
         }
 
         element.accept(visitor)
+    }
+
+    private fun checkTryExpr(holder: AnnotationHolder, o: RsTryExpr) {
+        if (!checkTryTraitFeature(holder, o)) return
+        val ambientScope = o.parentOfType<RsLambdaExpr>() ?: o.parentOfType<RsFunction>() ?: return
+        val retType = when (ambientScope) {
+            is RsFunction -> ambientScope.retType?.typeReference?.type
+            is RsLambdaExpr -> ambientScope.retType?.typeReference?.type
+            else -> null
+        }
+        val items = StdKnownItems.relativeTo(o)
+        val lookup = ImplLookup.relativeTo(o)
+        val tryExprTy = o.expr.type
+        if (isTriable(tryExprTy, lookup, items)) {
+            if (retType != null && isTriable(retType, lookup, items)) {
+                if (!isErrorsCompatible(retType, tryExprTy, lookup, items)) {
+                    tryFixErrorsCompatibility(tryExprTy, items, lookup, retType, holder, o)
+                }
+                return
+            }
+            holder.createErrorAnnotation(
+                o.q,
+                "the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `std::ops::Try`)"
+            )
+            return
+        }
+        holder.createErrorAnnotation(
+            o.q,
+            "the `?` operator can only be applied to values that implement `std::ops::Try`"
+        )
+
+    }
+
+    private fun tryFixErrorsCompatibility(tryExprTy: Ty, items: StdKnownItems, lookup: ImplLookup, retType: Ty, holder: AnnotationHolder, o: RsTryExpr) {
+        val tryExprErrorTy = findErrorTyUsingTryTrait(tryExprTy, items, lookup)
+        val tryError = tryExprErrorTy?.insertionSafeText ?: "<unknown>"
+        val fooErrorTy = findErrorTyUsingTryTrait(retType, items, lookup)
+        val funError = fooErrorTy?.insertionSafeText ?: "<unknown>"
+        val annotation = holder.createErrorAnnotation(
+            o.q,
+            "the trait `std::convert::From<$tryError>` is not implemented for `$funError`"
+        )
+        if (o.crateRoot == (fooErrorTy as? TyAdt ?: return).item.crateRoot) {
+            annotation.registerFix(ImplementFromTraitFix(o, tryExprErrorTy
+                ?: return, fooErrorTy))
+        }
+    }
+
+    //TODO:change when 'try_trait' feature will be added to CompilerFeatures
+    private fun checkTryTraitFeature(holder: AnnotationHolder, o: RsTryExpr): Boolean {
+        //if (!checkFeature(holder, o, %FEATURE NAME%, %FEATURE DESCRIPTION%)) return false
+        val version = o.cargoProject?.rustcInfo?.version ?: return false
+        return version.channel == RustChannel.NIGHTLY
     }
 
     private fun checkDotExpr(holder: AnnotationHolder, o: RsDotExpr) {
@@ -231,21 +292,24 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
         checkFeature(holder, crateModifier, CRATE_VISIBILITY_MODIFIER, "`crate` visibility modifier")
     }
 
+    /**
+     * @return true only if feature is active
+     */
     private fun checkFeature(
         holder: AnnotationHolder,
         element: PsiElement,
         feature: CompilerFeature,
         presentableFeatureName: String
-    ) {
-        val rsElement = element.ancestorOrSelf<RsElement>() ?: return
-        val version = rsElement.cargoProject?.rustcInfo?.version ?: return
+    ): Boolean {
+        val rsElement = element.ancestorOrSelf<RsElement>() ?: return false
+        val version = rsElement.cargoProject?.rustcInfo?.version ?: return false
 
         val diagnostic = when (feature.state) {
             ACTIVE -> {
                 if (version.channel != RustChannel.NIGHTLY) {
                     RsDiagnostic.ExperimentalFeature(element, presentableFeatureName)
                 } else {
-                    val crateRoot = rsElement.crateRoot ?: return
+                    val crateRoot = rsElement.crateRoot ?: return false
                     val attrs = RsFeatureIndex.getFeatureAttributes(element.project, feature.name)
                     if (attrs.none { it.crateRoot == crateRoot }) {
                         val fix = AddFeatureAttributeFix(feature.name, crateRoot)
@@ -261,8 +325,9 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
             } else {
                 null
             }
-        }
-        diagnostic?.addToHolder(holder)
+        } ?: return true
+        diagnostic.addToHolder(holder)
+        return false
     }
 
     private fun checkLabel(holder: AnnotationHolder, label: RsLabel) {
@@ -310,8 +375,8 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
         val traitName = trait.name ?: return
 
         fun mayDangleOnTypeOrLifetimeParameters(impl: RsImplItem): Boolean {
-            return impl.typeParameters.any() { it.queryAttributes.hasAtomAttribute("may_dangle") } ||
-                impl.lifetimeParameters.any() { it.queryAttributes.hasAtomAttribute("may_dangle") }
+            return impl.typeParameters.any { it.queryAttributes.hasAtomAttribute("may_dangle") } ||
+                impl.lifetimeParameters.any { it.queryAttributes.hasAtomAttribute("may_dangle") }
         }
 
         val attrRequiringUnsafeImpl = if (mayDangleOnTypeOrLifetimeParameters(impl)) "may_dangle" else null
@@ -595,4 +660,21 @@ private fun checkTypesAreSized(holder: AnnotationHolder, fn: RsFunction) {
     if (isError(ty)) {
         RsDiagnostic.SizedTraitIsNotImplemented(typeReference, ty).addToHolder(holder)
     }
+}
+
+private fun isTriable(ty: Ty?, implLookup: ImplLookup, items: StdKnownItems): Boolean {
+    return ty != null && implLookup.canSelect(TraitRef(ty, items.findTryTrait()?.withSubst() ?: return false))
+}
+
+private fun isErrorsCompatible(fnRetType: Ty, tryExprTy: Ty, lookup: ImplLookup, items: StdKnownItems): Boolean {
+    val fnRetErrorTy = findErrorTyUsingTryTrait(fnRetType, items, lookup) ?: return false
+    val tryErrorTy = findErrorTyUsingTryTrait(tryExprTy, items, lookup) ?: return false
+    val fromTrait = items.findFromTrait() ?: return false
+    return lookup.canSelect(TraitRef(fnRetErrorTy, fromTrait.withSubst(tryErrorTy)))
+}
+
+private fun findErrorTyUsingTryTrait(type: Ty, items: StdKnownItems, lookup: ImplLookup): Ty? {
+    val tryFromTrait = items.findTryTrait() ?: return null
+    return lookup.selectProjectionStrict(TraitRef(type, tryFromTrait.withSubst(type)),
+        tryFromTrait.findAssociatedType("Error") ?: return null).ok()?.value
 }
