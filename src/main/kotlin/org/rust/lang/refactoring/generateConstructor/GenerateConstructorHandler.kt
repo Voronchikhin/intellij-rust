@@ -1,5 +1,9 @@
-package org.rust.lang.refactoring.generateConstructor
+/*
+ * Use of this source code is governed by the MIT license that can be
+ * found in the LICENSE file.
+ */
 
+package org.rust.lang.refactoring.generateConstructor
 
 
 import com.intellij.codeInsight.CodeInsightActionHandler
@@ -12,13 +16,14 @@ import org.rust.lang.core.psi.RsFile
 import org.rust.lang.core.psi.RsStructItem
 import org.rust.lang.core.psi.ext.ancestorOrSelf
 
-class GenerateConstructorAction : CodeInsightAction(){
+class GenerateConstructorAction : CodeInsightAction() {
     override fun getHandler(): CodeInsightActionHandler = GenerateConstructorHandler()
     override fun isValidForFile(project: Project, editor: Editor, file: PsiFile): Boolean {
-        return GenerateConstructorHandler().isValidFor(editor,file)
+        return GenerateConstructorHandler().isValidFor(editor, file)
     }
 }
-class GenerateConstructorHandler : LanguageCodeInsightActionHandler{
+
+class GenerateConstructorHandler : LanguageCodeInsightActionHandler {
 
     override fun isValidFor(editor: Editor, file: PsiFile): Boolean {
         if (file !is RsFile) return false

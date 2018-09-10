@@ -1,3 +1,8 @@
+/*
+ * Use of this source code is governed by the MIT license that can be
+ * found in the LICENSE file.
+ */
+
 package org.rust.lang.refactoring
 
 import junit.framework.TestCase
@@ -7,10 +12,32 @@ import org.rust.lang.refactoring.generateConstructor.RsStructMemberChooserMember
 import org.rust.lang.refactoring.generateConstructor.mockStructMemberChooser
 
 class GenerateConstructorTest : RsTestBase() {
-    fun testEmtyStruct() = doTest("""
+    fun testEmptyTypeDecl() =
+        doTest("""
+        struct S{
+            n :  i32,
+            m :
+        }
+    """,
+            listOf(
+                ConstructorArgumentsSelection("n  :   i32", true),
+                ConstructorArgumentsSelection("m  :   [unknown]", true)),
+            """
+struct S{
+    n :  i32,
+    m :
+}
+
+impl S {
+    pub fn new(n: i32, m: [unknown]) -> Self {
+        S { n, m }
+    }
+}
+            """)
+
+    fun testEmptyStruct() = doTest("""
             struct S{}
-        """,
-        listOf(),
+        """, emptyList(),
         """
 struct S{}
 
@@ -21,6 +48,23 @@ impl S {
 }"""
     )
 
+    fun testTupleStruct() = doTest("""
+        struct Color(i32, i32, i32)/*caret*/;
+    """,
+        listOf(
+            ConstructorArgumentsSelection("field0  :   i32", true),
+            ConstructorArgumentsSelection("field1  :   i32", true),
+            ConstructorArgumentsSelection("field2  :   i32", true)
+        ),
+        """
+struct Color(i32, i32, i32);
+
+impl Color {
+    pub fn new(field0: i32, field1: i32, field2: i32) -> Self {
+        Color(field0, field1, field2)
+    }
+}""")
+
     fun testSelectNoneFields() = doTest("""
             struct S{
                     n :  i32,/*caret*/
@@ -28,8 +72,8 @@ impl S {
             }
         """,
         listOf(
-            ConstructorArgumentsSelection("n  :   i32",false),
-            ConstructorArgumentsSelection("m  :   i64",false)
+            ConstructorArgumentsSelection("n  :   i32", false),
+            ConstructorArgumentsSelection("m  :   i64", false)
         ),
         """
 struct S{
@@ -51,7 +95,7 @@ impl S {
             }
         """,
         listOf(
-            ConstructorArgumentsSelection("n  :   i32",true),
+            ConstructorArgumentsSelection("n  :   i32", true),
             ConstructorArgumentsSelection("m  :   i64", true)
         ),
         """
@@ -75,7 +119,7 @@ impl S {
             }
         """,
         listOf(
-            ConstructorArgumentsSelection("n  :   i32",true),
+            ConstructorArgumentsSelection("n  :   i32", true),
             ConstructorArgumentsSelection("m  :   i64", false)
         ),
         """
@@ -92,7 +136,7 @@ impl S {
     )
 
 
-    private data class ConstructorArgumentsSelection(val member: String, val isSelected: Boolean )
+    private data class ConstructorArgumentsSelection(val member: String, val isSelected: Boolean)
 
     private fun doTest(@Language("Rust") code: String,
                        chooser: List<ConstructorArgumentsSelection>,
@@ -107,6 +151,7 @@ impl S {
             }
         }
     }
+
     private fun extractSelected(all: List<RsStructMemberChooserMember>, chooser: List<ConstructorArgumentsSelection>): List<RsStructMemberChooserMember> {
         val selected = chooser.filter { it.isSelected }.map { it.member }
         return all.filter { selected.contains(it.formattedText()) }
