@@ -5,11 +5,13 @@
 
 package org.rust.ide.annotator
 
+import com.intellij.testFramework.LightProjectDescriptor
 import org.rust.MockRustcVersion
+import org.rust.WithStdlibRustProjectDescriptor
 
 class RsErrorAnnotatorTest : RsAnnotationTestBase() {
     override val dataPath = "org/rust/ide/annotator/fixtures/errors"
-
+    override fun getProjectDescriptor(): LightProjectDescriptor = WithStdlibRustProjectDescriptor
     fun `test invalid module declarations`() = doTest("helper.rs")
 
     fun `test create file quick fix`() = checkByDirectory {
@@ -253,15 +255,15 @@ class RsErrorAnnotatorTest : RsAnnotationTestBase() {
         fn ok1() { return; }
         fn ok2() -> () { return; }
         fn ok3() -> u32 {
-            let _ = || return;
-            return 10
+            let _ = || return;;
+            return 10;
         }
 
         fn err1() -> bool {
-            <error descr="`return;` in a function whose return type is not `()` [E0069]">return</error>;
+            <error descr="`return;` in a function whose return type is not `()` [E0069]">return;</error>;
         }
         fn err2() -> ! {
-            <error>return</error>
+            <error>return;</error>
         }
     """)
 
@@ -505,18 +507,18 @@ class RsErrorAnnotatorTest : RsAnnotationTestBase() {
 
     fun `test undeclared label E0426`() = checkErrors("""
         fn ok() {
-            'foo: loop { break 'foo }
-            'bar: while true { continue 'bar }
-            'baz: for _ in 0..3 { break 'baz }
+            'foo: loop { break 'foo; }
+            'bar: while true { continue 'bar; }
+            'baz: for _ in 0..3 { break 'baz; }
             'outer: loop {
-                'inner: while true { break 'outer }
+                'inner: while true { break 'outer; }
             }
         }
 
         fn err<'a>(a: &'a str) {
-            'foo: loop { continue <error descr="Use of undeclared label `'bar` [E0426]">'bar</error> }
-            while true { break <error descr="Use of undeclared label `'static` [E0426]">'static</error> }
-            for _ in 0..1 { break <error descr="Use of undeclared label `'a` [E0426]">'a</error> }
+            'foo: loop { continue; <error descr="Use of undeclared label `'bar` [E0426]">'bar</error> }
+            while true { break; <error descr="Use of undeclared label `'static` [E0426]">'static</error> }
+            for _ in 0..1 { break; <error descr="Use of undeclared label `'a` [E0426]">'a</error> }
         }
     """)
 
@@ -1181,5 +1183,19 @@ class RsErrorAnnotatorTest : RsAnnotationTestBase() {
 
     fun `test crate keyword not at the beginning`() = checkErrors("""
        use crate::foo::<error descr="`crate` is allowed only at the beginning">crate</error>::Foo;
+    """)
+
+    fun `test not allowed try expr`() = checkErrors("""
+       fn foo(){
+     let a = 2<error descr="the `?` operator can only be applied to values that implement `std::ops::Try`">?</error>;
+       }
+    """)
+
+
+    fun `test try expr in function that not allow try expr`() = checkErrors("""
+       fn foo()->i32{
+            Ok(92)<error descr="the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `std::ops::Try`)">?</error>;
+            92
+       }
     """)
 }

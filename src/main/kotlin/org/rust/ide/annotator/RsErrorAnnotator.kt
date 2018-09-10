@@ -14,18 +14,20 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import org.rust.cargo.project.workspace.PackageOrigin
 import org.rust.cargo.toolchain.RustChannel
-import org.rust.ide.annotator.fixes.AddFeatureAttributeFix
-import org.rust.ide.annotator.fixes.AddModuleFileFix
-import org.rust.ide.annotator.fixes.AddTurbofishFix
+import org.rust.ide.annotator.fixes.*
+import org.rust.ide.presentation.insertionSafeText
 import org.rust.lang.core.CRATE_VISIBILITY_MODIFIER
 import org.rust.lang.core.CompilerFeature
 import org.rust.lang.core.FeatureState.ACCEPTED
 import org.rust.lang.core.FeatureState.ACTIVE
 import org.rust.lang.core.psi.*
 import org.rust.lang.core.psi.ext.*
+import org.rust.lang.core.resolve.ImplLookup
 import org.rust.lang.core.resolve.Namespace
+import org.rust.lang.core.resolve.StdKnownItems
 import org.rust.lang.core.resolve.namespaces
 import org.rust.lang.core.stubs.index.RsFeatureIndex
+import org.rust.lang.core.types.TraitRef
 import org.rust.lang.core.types.inference
 import org.rust.lang.core.types.ty.*
 import org.rust.lang.core.types.type
@@ -68,10 +70,47 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
             override fun visitArrayType(o: RsArrayType) = collectDiagnostics(holder, o)
             override fun visitVariantDiscriminant(o: RsVariantDiscriminant) = collectDiagnostics(holder, o)
             override fun visitPolybound(o: RsPolybound) = checkPolybound(holder, o)
+            override fun visitTryExpr(o: RsTryExpr) = checkTryExpr(holder, o)
         }
 
         element.accept(visitor)
     }
+
+    private fun checkTryExpr(holder: AnnotationHolder, o: RsTryExpr) {
+        val items = StdKnownItems.relativeTo(o)
+        val tryTrait = items.findTryTrait() ?: return
+        val lookup = ImplLookup.relativeTo(o)
+        val errorTy = findErrorTyUsingTryTrait(o.expr.type, tryTrait, lookup)
+        val retType = findParentFnOrLambdaRetTy(o)
+        val tryExprTy = o.expr.type
+        val fooErrorTy = findErrorTyUsingTryTrait(retType, tryTrait, lookup)
+        val fromTrait = items.findFromTrait() ?: return
+        if (errorTy == null) {
+            holder.createErrorAnnotation(
+                o.q,
+                "the `?` operator can only be applied to values that implement `std::ops::Try`"
+            )
+            return
+        }
+        if (retType == null || fooErrorTy == null) {
+            holder.createErrorAnnotation(
+                o.q,
+                "the `?` operator can only be used in a function that returns `Result` or `Option`(or another type that implements `std::ops::Try`)"
+            )
+            return
+        }
+        if (isFnRetTyResultAndMatchErrTy(o.expr, retType, errorTy) || !checkTryTraitFeature(o)) return
+        if (!lookup.canSelect(TraitRef(retType, fromTrait.withSubst(tryExprTy)))) {
+            val annotation = holder.createErrorAnnotation(
+                o.q,
+                "the trait `std::convert::From<${errorTy.insertionSafeText}>`is not implemented for `${fooErrorTy.insertionSafeText}`"
+            )
+            if (fooErrorTy is TyAdt && o.crateRoot == fooErrorTy.item.crateRoot) {
+                annotation.registerFix(ImplementFromTraitFix(o, errorTy, fooErrorTy))
+            }
+        }
+    }
+
 
     private fun checkDotExpr(holder: AnnotationHolder, o: RsDotExpr) {
         val field = o.fieldLookup ?: o.methodCall ?: return
@@ -232,21 +271,24 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
         checkFeature(holder, crateModifier, CRATE_VISIBILITY_MODIFIER, "`crate` visibility modifier")
     }
 
+    /**
+     * @return true only if feature is active
+     */
     private fun checkFeature(
         holder: AnnotationHolder,
         element: PsiElement,
         feature: CompilerFeature,
         presentableFeatureName: String
-    ) {
-        val rsElement = element.ancestorOrSelf<RsElement>() ?: return
-        val version = rsElement.cargoProject?.rustcInfo?.version ?: return
+    ): Boolean {
+        val rsElement = element.ancestorOrSelf<RsElement>() ?: return false
+        val version = rsElement.cargoProject?.rustcInfo?.version ?: return false
 
         val diagnostic = when (feature.state) {
             ACTIVE -> {
                 if (version.channel != RustChannel.NIGHTLY) {
                     RsDiagnostic.ExperimentalFeature(element, presentableFeatureName)
                 } else {
-                    val crateRoot = rsElement.crateRoot ?: return
+                    val crateRoot = rsElement.crateRoot ?: return false
                     val attrs = RsFeatureIndex.getFeatureAttributes(element.project, feature.name)
                     if (attrs.none { it.crateRoot == crateRoot }) {
                         val fix = AddFeatureAttributeFix(feature.name, crateRoot)
@@ -262,8 +304,9 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
             } else {
                 null
             }
-        }
-        diagnostic?.addToHolder(holder)
+        } ?: return true
+        diagnostic.addToHolder(holder)
+        return false
     }
 
     private fun checkLabel(holder: AnnotationHolder, label: RsLabel) {
@@ -311,8 +354,8 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
         val traitName = trait.name ?: return
 
         fun mayDangleOnTypeOrLifetimeParameters(impl: RsImplItem): Boolean {
-            return impl.typeParameters.any() { it.queryAttributes.hasAtomAttribute("may_dangle") } ||
-                impl.lifetimeParameters.any() { it.queryAttributes.hasAtomAttribute("may_dangle") }
+            return impl.typeParameters.any { it.queryAttributes.hasAtomAttribute("may_dangle") } ||
+                impl.lifetimeParameters.any { it.queryAttributes.hasAtomAttribute("may_dangle") }
         }
 
         val attrRequiringUnsafeImpl = if (mayDangleOnTypeOrLifetimeParameters(impl)) "may_dangle" else null
@@ -597,3 +640,20 @@ private fun checkTypesAreSized(holder: AnnotationHolder, fn: RsFunction) {
         RsDiagnostic.SizedTraitIsNotImplemented(typeReference, ty).addToHolder(holder)
     }
 }
+
+
+private fun findErrorTyUsingTryTrait(type: Ty?, tryTrait: RsTraitItem, lookup: ImplLookup): Ty? {
+    if (type == null) return null
+    val assocType = tryTrait.findAssociatedType("Error") ?: return null
+    return lookup.selectProjectionStrict(TraitRef(type, tryTrait.withSubst(type)),
+        assocType).ok()?.value
+}
+
+//TODO:change when 'try_trait' feature will be added to CompilerFeatures
+private fun checkTryTraitFeature(o: RsExpr): Boolean {
+    //if (!checkFeature(holder, o, %FEATURE NAME%, %FEATURE DESCRIPTION%)) return false
+    val version = o.cargoProject?.rustcInfo?.version ?: return false
+    return version.channel == RustChannel.NIGHTLY
+}
+
+
