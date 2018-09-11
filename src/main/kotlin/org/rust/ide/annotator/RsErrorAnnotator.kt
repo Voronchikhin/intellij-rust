@@ -100,7 +100,7 @@ class RsErrorAnnotator : Annotator, HighlightRangeExtension {
             return
         }
         if (isFnRetTyResultAndMatchErrTy(o.expr, retType, errorTy) || !checkTryTraitFeature(o)) return
-        if (!lookup.canSelect(TraitRef(retType, fromTrait.withSubst(tryExprTy)))) {
+        if (!lookup.canSelect(TraitRef(fooErrorTy, fromTrait.withSubst(errorTy)))) {
             val annotation = holder.createErrorAnnotation(
                 o.q,
                 "the trait `std::convert::From<${errorTy.insertionSafeText}>`is not implemented for `${fooErrorTy.insertionSafeText}`"
